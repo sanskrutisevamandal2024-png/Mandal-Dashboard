@@ -223,8 +223,8 @@
 
 <script>
 /* GitHub Pages version: replaces google.script.run with calls to the Apps Script web app. */
-const API_URL = 'https://script.google.com/macros/s/AKfycbzG__q1pvJ0E5fKoplFpmern1rwmaVcQ3TPZpZHqBZBOlMahTw-uyGlL7fWWPPb2oZC6Q/exec';
-window.google = { script: { run: (function () {
+const API_URL = 'https://script.google.com/macros/s/AKfycbwgo6sI4Sc0KV9i0iMbKsiLle81VHAPunzkkyOCwafeyFFSesNLVdwmWs9Wt9CyhiMGaQ/exec';
+if (!(window.google && window.google.script && window.google.script.run)) window.google = { script: { run: (function () {
   function make(ok, fail) {
     return new Proxy({}, { get: function (_, name) {
       if (name === 'withSuccessHandler') return function (f) { return make(f, fail); };
@@ -243,7 +243,7 @@ window.google = { script: { run: (function () {
 })() } };
 </script>
 <script>
-window.addEventListener('error',, function (e) {
+window.addEventListener('error', function (e) {
   var s = document.getElementById('state');
   if (s) { s.hidden = false; s.className = 'error'; s.textContent = 'Error: ' + (e.message || 'unknown'); }
 });
@@ -257,6 +257,12 @@ if (!(window.google && google.script && google.script.run)) {
 <script>
 const I18N = {
   mr: {
+    addMember: '\u0938\u0926\u0938\u094d\u092f \u091c\u094b\u0921\u093e / \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092c\u0926\u0932\u093e',
+    membersList: '\u0938\u0926\u0938\u094d\u092f \u0932\u0949\u0917\u093f\u0928',
+    del: '\u0915\u093e\u0922\u093e',
+    confirmDel: '\u0939\u093e \u0932\u0949\u0917\u093f\u0928 \u0915\u093e\u0922\u093e\u092f\u091a\u093e \u0915\u093e?',
+    idleOut: '\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u0947\u092e\u0941\u0933\u0947 \u0932\u0949\u0917 \u0906\u0909\u091f \u091d\u093e\u0932\u0947. \u092a\u0941\u0928\u094d\u0939\u093e \u0932\u0949\u0917\u093f\u0928 \u0915\u0930\u093e.',
+    noMembers: '\u0905\u091c\u0942\u0928 \u0938\u0926\u0938\u094d\u092f \u0932\u0949\u0917\u093f\u0928 \u0928\u093e\u0939\u0940\u0924',
     title: 'संस्कृती सेवा मंडळ', sub: 'सभासद नोंदणी व जमाखर्च', lang: 'English',
     members: 'सभासद', collected: 'एकूण वर्गणी', avg: 'सरासरी वर्गणी',
     byType: 'सभासदाचा प्रकार', compare: 'वर्षानुसार सभासद',
@@ -271,6 +277,12 @@ const I18N = {
     payments: 'देणेदारांना दिलेली रक्कम', noCred: 'या वर्षी देणेदारांचे व्यवहार नाहीत', noPay: 'अजून कोणतेही पेमेंट नाही'
   },
   en: {
+    addMember: 'Add member / reset password',
+    membersList: 'Member logins',
+    del: 'Remove',
+    confirmDel: 'Remove this login?',
+    idleOut: 'Logged out after 5 minutes of inactivity. Please sign in again.',
+    noMembers: 'No member logins yet',
     title: 'Sanskruti Seva Mandal', sub: 'Member registration and accounts', lang: 'मराठी',
     members: 'Members', collected: 'Total collected', avg: 'Average contribution',
     byType: 'Member type', compare: 'Members by year',
@@ -314,14 +326,190 @@ function showLogin(msg, ok) {
 }
 function load() {
   $('login').hidden = true; $('state').hidden = false; $('state').className = ''; $('state').textContent = I18N[lang].load;
-  google.script.run
-    .withSuccessHandler(function (d) {
-      if (d && d.authError) return showLogin();
-      DATA = d; $('state').hidden = true; $('main').hidden = false; $('outBtn').hidden = false; render();
-    })
-    .withFailureHandler(function () { $('state').className = 'error'; $('state').textContent = I18N[lang].err; })
-    .getDashboardData(TOKEN);
+  fetchDashboard(function (d) {
+    if (d && d.authError) return showLogin();
+    DATA = d; $('state').hidden = true; $('main').hidden = false; $('outBtn').hidden = false; render();
+  }, function (e) {
+    $('state').className = 'error'; $('state').textContent = I18N[lang].err + (e && e.message ? ' (' + e.message + ')' : '');
+  });
 }
+
+/*DATA-START*/
+/* ===== Dashboard settings: change years, tab names and options HERE (no Code.gs change needed) ===== */
+const APP_CONFIG = {
+  YEARS: [   // newest first; 'tab' must match the sheet tab name exactly
+    { label: '2026-27', tab: 'Sabhasad Detail 26-27' },
+    { label: '2025-26', tab: 'Sabhasad Detail 25-26' },
+    { label: '2024-25', tab: 'Sabhasad Detail 24-25' }
+  ],
+  TB_TAB: 'Trail Balance',
+  BANK_TAB: 'Bank Statement',
+  CASH_TAB: 'Cash Statement',
+  CREDITOR_TAG: 'SUNDRY CREDITORS',
+  IE_TAB: 'Income&Expanditure Accounts',
+  SHOW_MEMBER_AMOUNTS: true
+};
+
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const pad2 = n => (n < 10 ? '0' : '') + n;
+const isD = v => v && typeof v === 'object' && v.__d !== undefined;
+const r2 = n => Math.round(n * 100) / 100;
+const num = v => {
+  if (typeof v === 'number') return v;
+  const s = String(v).replace(/[\u0966-\u096F]/g, d => String(d.charCodeAt(0) - 0x0966)).replace(/[^0-9.\-]/g, '');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+};
+const ist = ms => new Date(ms + 19800000);           // India time (UTC+5:30)
+const fmtDate = v => {
+  if (!isD(v)) return String(v).trim();
+  const d = ist(v.__d);
+  return pad2(d.getUTCDate()) + ' ' + MON[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+};
+const nowText = () => {
+  const d = ist(Date.now()), h = d.getUTCHours();
+  return fmtDate({ __d: Date.now() }) + ', ' + pad2(h % 12 || 12) + ':' + pad2(d.getUTCMinutes()) + ' ' + (h < 12 ? 'AM' : 'PM');
+};
+const findCol = (header, names) => { for (let i = 0; i < names.length; i++) { const x = header.indexOf(names[i]); if (x >= 0) return x; } return -1; };
+const need = (res, what) => { if (!res || res.error) throw new Error((res && res.error) || ('Missing ' + what)); return res.values; };
+
+function parseYear(values, y) {
+  if (!values.length) throw new Error('Empty tab: ' + y.tab);
+  const header = values[0].map(h => String(h).trim().toLowerCase());
+  const nameCol = findCol(header, ['full name', 'name']);
+  const amountCol = findCol(header, ['amount']);
+  const typeCol = findCol(header, ['sabhasad type']);
+  if (nameCol < 0 || amountCol < 0) throw new Error('Name/Amount column missing in ' + y.tab);
+  const members = [], byType = {};
+  let total = 0;
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i], name = String(row[nameCol]).trim();
+    if (!name) continue;
+    const amount = num(row[amountCol]), type = typeCol >= 0 ? String(row[typeCol]).trim() : '';
+    total += amount;
+    if (type) {
+      byType[type] = byType[type] || { type: type, count: 0, total: 0 };
+      byType[type].count++; byType[type].total += amount;
+    }
+    members.push({ n: name, t: type, a: APP_CONFIG.SHOW_MEMBER_AMOUNTS ? amount : null });
+  }
+  members.reverse();   // newest registration first
+  return { label: y.label, count: members.length, total: total, average: members.length ? total / members.length : 0,
+           byType: Object.keys(byType).map(k => byType[k]), members: members };
+}
+
+function parseTB(rows) {
+  const cashLines = [], list = [];
+  rows.forEach(r => {
+    const group = String(r[1]).trim().toUpperCase(), name = String(r[2]).trim();
+    if (!name) return;
+    const opening = num(r[3]), debit = num(r[4]), credit = num(r[5]), closing = num(r[6]);
+    if (group === 'ASSETS') {
+      if (closing !== 0) cashLines.push({ name: name, amount: r2(closing) });
+    } else if (group === APP_CONFIG.CREDITOR_TAG) {
+      if (opening === 0 && debit === 0 && credit === 0) return;
+      const due = r2(-closing);
+      list.push({ name: name, opening: r2(-opening), billed: r2(credit), paid: r2(debit), due: due,
+                  status: due > 0 ? 'due' : (due < 0 ? 'advance' : 'settled') });
+    }
+  });
+  list.sort((a, b) => b.due - a.due);
+  const sum = (arr, f) => r2(arr.reduce((s, x) => s + f(x), 0));
+  const cashBank = sum(cashLines, x => x.amount);
+  const cashOnHand = sum(cashLines.filter(x => /cash/i.test(x.name)), x => x.amount);
+  return { cashBank: cashBank, cashOnHand: cashOnHand, bankBalance: r2(cashBank - cashOnHand), cashLines: cashLines,
+    creditors: { list: list, totalDue: sum(list, x => x.due > 0 ? x.due : 0), vendorsWithDues: list.filter(x => x.due > 0).length,
+                 totalBilled: sum(list, x => x.billed), totalPaid: sum(list, x => x.paid), payments: [] } };
+}
+
+function parsePayments(rows) {
+  const out = [];
+  rows.forEach(r => {
+    if (String(r[10]).trim().toUpperCase() !== APP_CONFIG.CREDITOR_TAG) return;
+    const amount = num(r[3]);
+    if (amount <= 0) return;
+    out.push({ ts: isD(r[0]) ? r[0].__d : 0, d: fmtDate(r[0]), v: String(r[8]).trim(), r: String(r[7]).trim(), a: amount });
+  });
+  out.sort((a, b) => b.ts - a.ts);
+  return out.slice(0, 200).map(x => ({ d: x.d, v: x.v, r: x.r, a: x.a }));
+}
+
+function parseBank(rows) {
+  let started = false, opening = 0, totalIn = 0, totalOut = 0;
+  const list = [];
+  rows.forEach(r => {
+    if (!started) { started = String(r[0]).trim().toLowerCase() === 'date'; return; }
+    if (!isD(r[0])) return;
+    if (/^\s*(opeing|opening)\b/i.test(String(r[7]))) { opening = num(r[4]); return; }
+    const i = num(r[2]), o = num(r[3]);
+    totalIn += i; totalOut += o;
+    list.push({ d: fmtDate(r[0]), h: String(r[8]).trim(), r: String(r[7]).trim(), c: String(r[5]).trim(), i: i, o: o, b: num(r[4]) });
+  });
+  return { opening: opening, totalIn: r2(totalIn), totalOut: r2(totalOut), count: list.length, rows: list.reverse().slice(0, 300) };
+}
+
+function parseCash(rows) {
+  let started = false, totalIn = 0, totalOut = 0;
+  const list = [];
+  rows.forEach(r => {
+    if (!started) { started = String(r[0]).trim().toLowerCase() === 'date'; return; }
+    const i = num(r[1]), o = num(r[2]);
+    if (!i && !o) return;
+    totalIn += i; totalOut += o;
+    const tags = [r[5], r[6]].map(t => String(t).trim()).filter(t => t && !/cash/i.test(t));
+    list.push({ d: fmtDate(r[0]), h: tags[0] || '', r: String(r[4]).trim(), c: '', i: i, o: o, b: num(r[3]) });
+  });
+  return { opening: 0, totalIn: r2(totalIn), totalOut: r2(totalOut), count: list.length, rows: list.reverse().slice(0, 300) };
+}
+
+function parseIE(rows) {   // C5:I24 -> expenses in C+D, income in G+H
+  const expenses = [], income = [];
+  rows.forEach(r => {
+    const en = String(r[0]).trim();
+    if (en && typeof r[1] === 'number' && r[1] > 0) expenses.push({ name: en, amount: r[1] });
+    const inn = String(r[4]).trim();
+    if (inn && typeof r[5] === 'number' && r[5] > 0) income.push({ name: inn, amount: r[5] });
+  });
+  const byAmount = (a, b) => b.amount - a.amount;
+  expenses.sort(byAmount); income.sort(byAmount);
+  const totalIncome = income.reduce((s, x) => s + x.amount, 0), totalExpense = expenses.reduce((s, x) => s + x.amount, 0);
+  return { income: income, expenses: expenses, totalIncome: totalIncome, totalExpense: totalExpense, net: totalIncome - totalExpense };
+}
+
+/* results: server answers in the same order as the requests made in fetchDashboard() */
+function buildDashboard(results) {
+  const C = APP_CONFIG, n = C.YEARS.length;
+  const years = C.YEARS.map((y, i) => {
+    const r = parseYear(need(results[i], y.tab), y);
+    if (i > 0) { r.members = []; r.byType = []; }   // older years: counts and totals only
+    return r;
+  });
+  const tbRows = need(results[n], C.TB_TAB), bankRows = need(results[n + 1], C.BANK_TAB),
+        cashRows = need(results[n + 2], C.CASH_TAB), ieRows = need(results[n + 3], C.IE_TAB);
+  const tb = parseTB(tbRows);
+  tb.creditors.payments = parsePayments(bankRows);
+  const bank = parseBank(bankRows); bank.balance = tb.bankBalance;
+  const cash = parseCash(cashRows); cash.balance = tb.cashOnHand;
+  const ie = parseIE(ieRows);
+  return { years: years, updated: nowText(), accounts: {
+    cashBank: tb.cashBank, cashLines: tb.cashLines, creditors: tb.creditors, bank: bank, cash: cash,
+    income: ie.income, expenses: ie.expenses, totalIncome: ie.totalIncome, totalExpense: ie.totalExpense, net: ie.net } };
+}
+
+function fetchDashboard(done, fail) {
+  const C = APP_CONFIG;
+  const reqs = C.YEARS.map(y => ({ k: 'members', tab: y.tab, cols: 12 })).concat([
+    { k: 'accounts', tab: C.TB_TAB, cols: 8 },
+    { k: 'accounts', tab: C.BANK_TAB, cols: 11 },
+    { k: 'accounts', tab: C.CASH_TAB, cols: 7 },
+    { k: 'accounts', tab: C.IE_TAB, range: 'C5:I24' }
+  ]);
+  google.script.run.withSuccessHandler(function (r) {
+    if (!r || r.authError) return done({ authError: true });
+    try { done(buildDashboard(r.results)); } catch (e) { fail(e); }
+  }).withFailureHandler(fail).readSheets(TOKEN, reqs);
+}
+/*DATA-END*/
 applyStatic();
 if (TOKEN) load(); else showLogin();
 
@@ -447,9 +635,9 @@ function renderSettings() {
   const f = (id, label, type, val, ac) => '<label for="' + id + '">' + label + '</label><input class="search" id="' + id +
     '" type="' + type + '" value="' + esc(val) + '" autocomplete="' + ac + '" autocapitalize="none" required>';
   el.innerHTML =
-    '<section><h2>' + S.memberLogin + '</h2><form class="box set" id="fMember"><p>' + S.curUser + ': <b>' + esc(SETTINGS.memberUser) + '</b></p>' +
-      f('mUid', S.newUser, 'text', SETTINGS.memberUser, 'off') + f('mPw', S.newPass, 'text', '', 'off') +
-      '<button class="btn" type="submit">' + S.update + '</button><p class="msg" id="mMsg" role="status"></p></form></section>' +
+    '<section><h2>' + S.membersList + ' (' + SETTINGS.members.length + ')</h2><ul class="members">' + (SETTINGS.members.length ? SETTINGS.members.map(m => '<li><span>' + esc(m) + '</span><button class="btn" type="button" data-del="' + esc(m) + '">' + S.del + '</button></li>').join('') : '<li class="empty">' + S.noMembers + '</li>') + '</ul>' +
+      '<form class="box set" id="fMember">' + f('mUid', S.newUser, 'text', '', 'off') + f('mPw', S.newPass, 'text', '', 'off') +
+      '<button class="btn" type="submit">' + S.addMember + '</button><p class="msg" id="mMsg" role="status"></p></form></section>' +
     '<section><h2>' + S.adminLogin + '</h2><form class="box set" id="fAdmin">' +
       f('aCur', S.curAdminPass, 'password', '', 'current-password') + f('aUid', S.newUser, 'text', SETTINGS.adminUser, 'off') +
       f('aPw', S.newPass, 'password', '', 'new-password') +
@@ -465,11 +653,11 @@ $('pSettings').addEventListener('submit', function (e) {
     if (!r || r.authError) return showLogin();
     if (!r.ok) { msg.className = 'msg err'; msg.textContent = S[r.error] || S.err; return; }
     if (r.relogin) return showLogin(S.reLogin, true);
-    SETTINGS.memberUser = $('mUid').value.trim(); renderSettings();
+    if (r.members) SETTINGS.members = r.members; renderSettings();
     $('mMsg').className = 'msg ok'; $('mMsg').textContent = S.saved;
   };
   const run = google.script.run.withSuccessHandler(done).withFailureHandler(fail);
-  if (isM) run.updateMemberLogin(TOKEN, $('mUid').value, $('mPw').value);
+  if (isM) run.addMember(TOKEN, $('mUid').value.trim(), $('mPw').value);
   else run.updateAdminLogin(TOKEN, $('aCur').value, $('aUid').value, $('aPw').value);
 });
 
@@ -497,6 +685,40 @@ function renderList() {
     '<li><span>' + esc(m.n) + (m.t ? '<span class="sub">' + esc(typeName(m.t)) + '</span>' : '') + '</span>' +
     (m.a === null ? '' : '<span class="amt">' + money(m.a) + '</span>') + '</li>').join('');
 }
+
+$('pSettings').addEventListener('click', function (e) {
+  const b = e.target.closest('button[data-del]');
+  if (!b) return;
+  const S = I18N[lang];
+  if (!confirm(S.confirmDel + ' ' + b.dataset.del)) return;
+  google.script.run.withSuccessHandler(function (r) {
+    if (!r || r.authError) return showLogin();
+    if (r.ok) { SETTINGS.members = r.members; renderSettings(); }
+  }).deleteMember(TOKEN, b.dataset.del);
+});
+
+/* Auto logout after 5 minutes without activity; heartbeat keeps the server session alive while active. */
+const IDLE_MS = 5 * 60 * 1000;
+let lastActive = Date.now(), lastPing = 0;
+['click', 'touchstart', 'keydown', 'scroll', 'mousemove'].forEach(function (ev) {
+  window.addEventListener(ev, function () { lastActive = Date.now(); }, { passive: true });
+});
+function idleCheck() {
+  if (!TOKEN) return;
+  const now = Date.now();
+  if (now - lastActive >= IDLE_MS) {
+    google.script.run.logout(TOKEN);
+    return showLogin(I18N[lang].idleOut, false);
+  }
+  if (lastActive > lastPing && now - lastPing >= 60000) {
+    lastPing = now;
+    google.script.run.withSuccessHandler(function (r) {
+      if (!r || !r.ok) showLogin(I18N[lang].idleOut, false);
+    }).ping(TOKEN);
+  }
+}
+setInterval(idleCheck, 15000);
+document.addEventListener('visibilitychange', idleCheck);
 </script>
 </body>
 </html>
