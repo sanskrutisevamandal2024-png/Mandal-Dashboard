@@ -130,6 +130,8 @@
   .msg { margin: 10px 0 0; min-height: 1.4em; }
   .msg.err { color: var(--hibiscus); } .msg.ok { color: var(--green); }
   .band .lang + .lang { margin-left: 8px; }
+  .login label.showpw { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 8px 0 0; cursor: pointer; }
+  .login label.showpw input { width: 18px; height: 18px; }
 
   /* ===== UI upgrade: large Ganpati background, glass cards, sticky tabs, live-data bar ===== */
   :root { --gold: #C8962E; --maroon: #4A1512; }
@@ -198,6 +200,7 @@
       <input class="search" id="uid" name="username" autocomplete="username" autocapitalize="none" required>
       <label for="pw" id="pwL"></label>
       <input class="search" id="pw" name="password" type="password" autocomplete="current-password" required>
+      <label class="showpw"><input type="checkbox" id="showPw"> <span id="showPwT">Show password</span></label>
       <button class="btn" id="loginBtn" type="submit"></button>
       <p class="msg err" id="loginMsg" role="alert"></p>
     </form>
@@ -270,7 +273,7 @@ if (!(window.google && window.google.script && window.google.script.run)) window
       return function () {
         const args = Array.prototype.slice.call(arguments);
         fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                         body: JSON.stringify({ fn: name, args: args }) })
+                         body: JSON.stringify({ fn: name, args: args }), cache: 'no-store' })
           .then(function (r) { return r.json(); })
           .then(function (j) { if (!j.ok) throw new Error(j.error); if (ok) ok(j.result); })
           .catch(function (e) { if (fail) fail(e); });
@@ -365,6 +368,7 @@ function applyStatic() {
   $('langBtn').textContent = S.lang; $('outBtn').textContent = S.signOut;
   $('loginH').textContent = S.loginTitle; $('uidL').textContent = S.userId;
   $('pwL').textContent = S.password; $('loginBtn').textContent = S.signIn;
+  $('showPwT').textContent = lang === 'mr' ? 'पासवर्ड दाखवा' : 'Show password';
   paintLive();
 }
 function showLogin(msg, ok) {
@@ -582,7 +586,7 @@ $('loginForm').addEventListener('submit', function (e) {
   google.script.run
     .withSuccessHandler(function (r) {
       btn.disabled = false;
-      if (r.ok) { TOKEN = r.token; ROLE = r.role; keep(); $('uid').value = ''; $('pw').value = ''; load(); }
+      if (r.ok) { clearLocalCache(); TOKEN = r.token; ROLE = r.role; keep(); $('uid').value = ''; $('pw').value = ''; $('showPw').checked = false; $('pw').type = 'password'; load(); }
       else { $('loginMsg').className = 'msg err'; $('loginMsg').textContent = r.locked ? S.locked : r.notSetup ? S.notSetup : S.badLogin; }
     })
     .withFailureHandler(function () { btn.disabled = false; $('loginMsg').className = 'msg err'; $('loginMsg').textContent = S.err; })
@@ -595,6 +599,17 @@ $('tabs').addEventListener('click', function (e) {
 });
 
 let tab = 'members';
+
+/* Show / hide password on the login form */
+$('showPw').addEventListener('change', function () { $('pw').type = this.checked ? 'text' : 'password'; });
+
+/* Clear every local copy of data so the dashboard always loads live from Google */
+function clearLocalCache() {
+  DATA = null; SETTINGS = null;
+  try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+  try { if (window.caches) caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }); } catch (e) {}
+  try { if (navigator.serviceWorker) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }); } catch (e) {}
+}
 const sm = n => (n < 0 ? '−' : '') + money(Math.abs(n));
 
 function bar(label, right, pct, cur) {
