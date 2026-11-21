@@ -561,6 +561,8 @@ function fetchDashboard(done, fail) {
     { k: 'accounts', tab: C.CASH_TAB, cols: 7 },
     { k: 'accounts', tab: C.IE_TAB, range: 'C5:I24' }
   ]);
+  const stamp = Date.now();
+  reqs.forEach(function (q) { q.nc = stamp; });   // unique key on every fetch, bypasses any request-based cache
   google.script.run.withSuccessHandler(function (r) {
     if (!r || r.authError) return done({ authError: true });
     try { done(buildDashboard(r.results)); } catch (e) { fail(e); }
