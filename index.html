@@ -407,9 +407,13 @@ const isD = v => v && typeof v === 'object' && v.__d !== undefined;
 const r2 = n => Math.round(n * 100) / 100;
 const num = v => {
   if (typeof v === 'number') return v;
-  const s = String(v).replace(/[\u0966-\u096F]/g, d => String(d.charCodeAt(0) - 0x0966)).replace(/[^0-9.\-]/g, '');
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
+  const s = String(v)
+    .replace(/[\u0966-\u096F]/g, d => String(d.charCodeAt(0) - 0x0966))
+    .replace(/rs\.?|inr|\u20B9/gi, '')
+    .replace(/,/g, '')
+    .trim();
+  const m = s.match(/-?\d*\.?\d+/);
+  return m ? parseFloat(m[0]) : 0;
 };
 const ist = ms => new Date(ms + 19800000);           // India time (UTC+5:30)
 const fmtDate = v => {
@@ -500,15 +504,17 @@ function parseBank(rows) {
 }
 
 function parseCash(rows) {
-  let started = false, totalIn = 0, totalOut = 0;
+  let started = false, totalIn = 0, totalOut = 0, run = 0;
   const list = [];
   rows.forEach(r => {
     if (!started) { started = String(r[0]).trim().toLowerCase() === 'date'; return; }
-    const i = num(r[1]), o = num(r[2]);
+    const o = num(r[1]), i = num(r[2]);   // B = Debit = Cash Paid, C = Credit = Cash Received
     if (!i && !o) return;
     totalIn += i; totalOut += o;
+    const hasBal = String(r[3]).trim() !== '';
+    run = hasBal ? num(r[3]) : r2(run + i - o);
     const tags = [r[5], r[6]].map(t => String(t).trim()).filter(t => t && !/cash/i.test(t));
-    list.push({ d: fmtDate(r[0]), h: tags[0] || '', r: String(r[4]).trim(), c: '', i: i, o: o, b: num(r[3]) });
+    list.push({ d: fmtDate(r[0]), h: tags[0] || '', r: String(r[4]).trim(), c: '', i: i, o: o, b: run });
   });
   return { opening: 0, totalIn: r2(totalIn), totalOut: r2(totalOut), count: list.length, rows: list.reverse().slice(0, 300) };
 }
