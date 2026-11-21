@@ -272,8 +272,8 @@ if (!(window.google && window.google.script && window.google.script.run)) window
       if (name === 'withFailureHandler') return function (f) { return make(ok, f); };
       return function () {
         const args = Array.prototype.slice.call(arguments);
-        fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                         body: JSON.stringify({ fn: name, args: args }), cache: 'no-store' })
+        fetch(API_URL + '?_=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                         body: JSON.stringify({ fn: name, args: args }), cache: 'reload' })
           .then(function (r) { return r.json(); })
           .then(function (j) { if (!j.ok) throw new Error(j.error); if (ok) ok(j.result); })
           .catch(function (e) { if (fail) fail(e); });
@@ -578,7 +578,20 @@ if (TOKEN) load(); else showLogin();
 
 $('langBtn').addEventListener('click', function () { lang = lang === 'mr' ? 'en' : 'mr'; if (DATA) render(); else applyStatic(); });
 $('outBtn').addEventListener('click', function () { google.script.run.logout(TOKEN); showLogin(); });
-$('liveBtn').addEventListener('click', function () { if (busy || !TOKEN) return; busy = true; paintLive(); load(); });
+function clearLiveCache() {
+  DATA = null; SETTINGS = null;   // drop old data held in memory
+  try { localStorage.clear(); } catch (e) {}   // keep sessionStorage so login token stays
+  try { if (window.caches) caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }); } catch (e) {}
+  try { if (navigator.serviceWorker) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }); } catch (e) {}
+}
+$('liveBtn').addEventListener('click', function () {
+  if (busy || !TOKEN) return;
+  busy = true;
+  clearLiveCache();
+  $('main').hidden = true;   // hide old data so it can't be seen while loading
+  paintLive();
+  load();
+});
 $('loginForm').addEventListener('submit', function (e) {
   e.preventDefault();
   const S = I18N[lang], btn = $('loginBtn');
